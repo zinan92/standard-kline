@@ -3,102 +3,325 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>standard-kline browser demo</title>
-  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <title>standard-kline — provider-agnostic OHLCV chart wrapper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js" integrity="sha384-q1KYLSKHgBnW5tWYGGR8+6YV4/iPy31dILoF2I1OD7XiVUvHEp/TaxIQVmB0j3R2" crossorigin="anonymous"></script>
   <script src="../standard-kline.js"></script>
   <style>
     :root{
-      --bg:#08090b;
-      --panel:#11151b;
-      --text:#e5e7eb;
-      --muted:#8b95a3;
-      --line:rgba(255,255,255,.12);
+      --bg:#07080a;
+      --bg-2:#0c0e12;
+      --panel:#0e1015;
+      --panel-2:#12151b;
+      --line:rgba(255,255,255,.09);
+      --line-strong:rgba(255,255,255,.16);
+      --text:#eef0f4;
+      --muted:#8b93a3;
+      --faint:#5b6373;
       --gold:#d8aa3f;
-      --blue:#7aa2ff;
+      --gold-dim:rgba(216,170,63,.5);
+      --teal:#2dd4bf;
       --red:#ff6b6b;
-      --green:#2dd4bf;
+      --blue:#7aa2ff;
+      --serif:"Instrument Serif", "Iowan Old Style", Georgia, serif;
+      --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    main{min-height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr);gap:12px;padding:20px}
-    header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;border-bottom:1px solid var(--line);padding-bottom:14px}
-    h1{font-size:22px;line-height:1.1;margin:0 0 4px}
-    p{margin:0;color:var(--muted)}
-    .meta{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-align:right}
-    .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;min-height:0}
-    #chart{height:min(68vh,560px);min-height:420px;border:1px solid var(--line);background:rgba(255,255,255,.015)}
-    aside{border-left:1px solid var(--line);padding-left:16px;display:grid;gap:14px;align-content:start}
-    .block{display:grid;gap:8px}
-    .label{font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-    pre{margin:0;white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);padding:12px;overflow:auto;color:#cbd5e1}
-    button{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);color:var(--text);padding:7px 10px;cursor:pointer}
-    button:hover{border-color:rgba(216,170,63,.55);color:var(--gold)}
-    .buttons{display:flex;flex-wrap:wrap;gap:8px}
-    @media(max-width:900px){
-      main{padding:14px}
-      header{align-items:flex-start;flex-direction:column}
-      .meta{text-align:left}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:
+        radial-gradient(ellipse 900px 500px at 82% -8%, rgba(216,170,63,.14), transparent 60%),
+        radial-gradient(ellipse 700px 480px at -8% 108%, rgba(122,162,255,.08), transparent 55%),
+        var(--bg);
+      color:var(--text);
+      font:14px/1.5 var(--mono);
+      -webkit-font-smoothing:antialiased;
+    }
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      background-image:repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0px, rgba(255,255,255,.018) 1px, transparent 1px, transparent 3px);
+      mix-blend-mode:overlay;
+      opacity:.5;
+    }
+    main{
+      max-width:1320px;
+      margin:0 auto;
+      padding:34px 28px 40px;
+    }
+    .frame{
+      border:1px solid var(--line-strong);
+      border-radius:14px;
+      background:linear-gradient(180deg, rgba(255,255,255,.025), transparent 140px), var(--panel);
+      box-shadow:0 40px 90px -30px rgba(0,0,0,.75), 0 1px 0 rgba(255,255,255,.05) inset;
+      overflow:hidden;
+    }
+    .chrome{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:12px 16px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.015);
+    }
+    .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.14)}
+    .dot.gold{background:var(--gold);box-shadow:0 0 8px rgba(216,170,63,.55)}
+    .chrome-path{
+      margin-left:8px;
+      font-size:11px;
+      letter-spacing:.04em;
+      color:var(--faint);
+    }
+    .chrome-path b{color:var(--muted);font-weight:500}
+    header{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:24px;
+      padding:26px 28px 22px;
+      border-bottom:1px solid var(--line);
+    }
+    .eyebrow{
+      font:600 10px/1 var(--mono);
+      letter-spacing:.22em;
+      text-transform:uppercase;
+      color:var(--gold);
+      margin:0 0 10px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .eyebrow::before{content:"";width:16px;height:1px;background:var(--gold-dim)}
+    h1{
+      font:italic 400 44px/1 var(--serif);
+      letter-spacing:.002em;
+      margin:0 0 10px;
+      color:var(--text);
+    }
+    h1 em{color:var(--gold);font-style:italic}
+    .tagline{
+      margin:0;
+      max-width:46ch;
+      color:var(--muted);
+      font-size:12.5px;
+      line-height:1.55;
+    }
+    .badges{
+      display:flex;
+      flex-direction:column;
+      align-items:flex-end;
+      gap:8px;
+    }
+    .badge-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .badge{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      border:1px solid var(--line-strong);
+      background:var(--panel-2);
+      border-radius:5px;
+      padding:5px 9px;
+      font-size:10.5px;
+      letter-spacing:.03em;
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .badge b{color:var(--text);font-weight:600}
+    .badge.live{border-color:var(--gold-dim);color:var(--gold)}
+    .badge .pip{width:5px;height:5px;border-radius:50%;background:var(--teal)}
+    .badge.live .pip{background:var(--gold)}
+    .layout{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 268px;
+    }
+    #chart{
+      height:560px;
+      border-right:1px solid var(--line);
+    }
+    aside{
+      display:grid;
+      grid-template-rows:auto auto 1fr;
+      gap:0;
+      background:var(--bg-2);
+    }
+    .console-block{
+      padding:20px 20px 18px;
+      border-bottom:1px solid var(--line);
+    }
+    .console-label{
+      font:600 10px/1 var(--mono);
+      letter-spacing:.16em;
+      text-transform:uppercase;
+      color:var(--faint);
+      margin:0 0 12px;
+    }
+    .keys{display:grid;gap:6px}
+    .key{
+      display:flex;
+      align-items:center;
+      gap:9px;
+      width:100%;
+      border:1px solid var(--line-strong);
+      background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.01));
+      color:var(--text);
+      border-radius:6px;
+      padding:8px 10px;
+      font:500 11.5px/1 var(--mono);
+      letter-spacing:.02em;
+      cursor:pointer;
+      text-align:left;
+      transition:border-color .15s ease, color .15s ease, transform .1s ease;
+    }
+    .key:hover{border-color:var(--gold-dim);color:var(--gold);transform:translateX(1px)}
+    .key:active{transform:translateX(1px) scale(.985)}
+    .key .f{
+      font-size:9.5px;
+      color:var(--faint);
+      border:1px solid var(--line-strong);
+      border-radius:3px;
+      padding:1px 5px;
+      min-width:22px;
+      text-align:center;
+    }
+    .key:hover .f{color:var(--gold);border-color:var(--gold-dim)}
+    .readout{
+      padding:18px 20px 20px;
+      font-size:11.5px;
+    }
+    .readout-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:baseline;
+      padding:6px 0;
+      border-bottom:1px dashed var(--line);
+      color:var(--muted);
+    }
+    .readout-row:last-child{border-bottom:0}
+    .readout-row b{color:var(--text);font-weight:600}
+    .capability{
+      margin-top:auto;
+      padding:18px 20px 22px;
+      color:var(--faint);
+      font-size:10.5px;
+      line-height:1.7;
+      border-top:1px solid var(--line);
+      background:rgba(0,0,0,.15);
+    }
+    .capability .in{color:var(--teal)}
+    .capability .out{color:var(--blue)}
+    .capability .fail{color:var(--red)}
+    footer{
+      display:flex;
+      justify-content:space-between;
+      padding:12px 28px;
+      border-top:1px solid var(--line);
+      font-size:10.5px;
+      color:var(--faint);
+      letter-spacing:.03em;
+    }
+    footer a{color:var(--muted)}
+    @media(max-width:920px){
       .layout{grid-template-columns:1fr}
-      aside{border-left:0;border-top:1px solid var(--line);padding-left:0;padding-top:14px}
+      #chart{border-right:0;border-bottom:1px solid var(--line);height:420px}
+      header{flex-direction:column;align-items:flex-start}
+      .badges{align-items:flex-start}
+      .badge-row{justify-content:flex-start}
     }
   </style>
 </head>
 <body>
   <main>
-    <header>
-      <div>
-        <h1>standard-kline</h1>
-        <p>Provider-agnostic OHLCV chart wrapper with synthetic watermark, overlays, zoom, pan, and fit.</p>
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot gold"></span>
+        <span class="chrome-path"><b>examples/</b>browser-demo.html</span>
       </div>
-      <div class="meta" id="meta">loading</div>
-    </header>
-    <section class="layout">
-      <div id="chart"></div>
-      <aside>
-        <div class="block">
-          <div class="label">Controls</div>
-          <div class="buttons">
-            <button type="button" data-demo="real">Real payload</button>
-            <button type="button" data-demo="synthetic">Synthetic payload</button>
-            <button type="button" data-demo="zoom">Zoom</button>
-            <button type="button" data-demo="pan">Pan</button>
-            <button type="button" data-demo="fit">Fit</button>
+      <header>
+        <div>
+          <p class="eyebrow">candlestick renderer · zero build deps</p>
+          <h1><em>standard</em>-kline</h1>
+          <p class="tagline">Any OHLCV source in, a trustworthy candlestick chart out — with synthetic-data watermarking and a zoom/pan/fit that can't get stuck.</p>
+        </div>
+        <div class="badges">
+          <div class="badge-row" id="statusBadges"></div>
+          <div class="badge-row">
+            <span class="badge"><span class="pip"></span>lightweight-charts 5.2</span>
           </div>
         </div>
-        <div class="block">
-          <div class="label">Capability contract</div>
-          <pre>in  OHLCV bars + metadata + overlays
-out candles + volume + lines + markers
-
-fail synthetic/demo data → watermark
-fail extreme range       → clamp</pre>
-        </div>
-        <div class="block">
-          <div class="label">Current range</div>
-          <pre id="range">--</pre>
-        </div>
-      </aside>
-    </section>
+      </header>
+      <div class="layout">
+        <div id="chart"></div>
+        <aside>
+          <div class="console-block">
+            <p class="console-label">Console</p>
+            <div class="keys">
+              <button class="key" type="button" data-demo="real"><span class="f">F1</span> Real payload</button>
+              <button class="key" type="button" data-demo="synthetic"><span class="f">F2</span> Synthetic payload</button>
+              <button class="key" type="button" data-demo="zoom"><span class="f">F3</span> Zoom in</button>
+              <button class="key" type="button" data-demo="pan"><span class="f">F4</span> Pan right</button>
+              <button class="key" type="button" data-demo="fit"><span class="f">F5</span> Fit all</button>
+            </div>
+          </div>
+          <div class="readout">
+            <p class="console-label">Visible range</p>
+            <div class="readout-row"><span>from</span><b id="rangeFrom">--</b></div>
+            <div class="readout-row"><span>to</span><b id="rangeTo">--</b></div>
+            <div class="readout-row"><span>width</span><b id="rangeWidth">--</b></div>
+          </div>
+          <div class="capability">
+            <div><span class="in">in</span> &nbsp;OHLCV bars + provider metadata + overlays</div>
+            <div><span class="out">out</span> candles + volume + price lines + markers</div>
+            <div style="margin-top:8px"><span class="fail">fail</span> synthetic data &rarr; visible watermark</div>
+            <div><span class="fail">fail</span> extreme zoom/pan &rarr; clamped, never stuck</div>
+          </div>
+        </aside>
+      </div>
+      <footer>
+        <span>MIT licensed · zero build dependency</span>
+        <span>github.com/zinan92/standard-kline</span>
+      </footer>
+    </div>
   </main>
 
   <script>
+    function mulberry32(seed){
+      return function(){
+        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
     function bars(count, options){
+      const rand = mulberry32(options.seed || 1);
       const start = Date.parse("2026-07-05T01:00:00Z") / 1000;
       const out = [];
       let last = options.base || 4100;
+      let momentum = 0;
       for(let i = 0; i < count; i += 1){
-        const drift = Math.sin(i / 7) * 7 + Math.cos(i / 13) * 4 + i * .18;
-        const close = Math.round((last + drift * .08) * 10) / 10;
+        const noise = (rand() - 0.5) * 2.3;
+        const impulse = rand() < 0.07 ? (rand() - 0.5) * 10 : 0;
+        momentum = momentum * 0.7 + noise * 0.55;
+        const close = Math.round((last + momentum + impulse) * 10) / 10;
         const open = last;
-        const high = Math.max(open, close) + 2 + (i % 5) * .35;
-        const low = Math.min(open, close) - 2 - (i % 4) * .28;
+        const bodySpan = Math.abs(close - open);
+        const wickPad = bodySpan * .4 + 1 + rand() * 1.6;
+        const high = Math.max(open, close) + wickPad * (.3 + rand() * .5);
+        const low = Math.min(open, close) - wickPad * (.3 + rand() * .5);
+        const volume = Math.round(38 + bodySpan * 24 + rand() * 46);
         out.push({
           timestamp:start + i * 60,
           open:Number(open.toFixed(2)),
           high:Number(high.toFixed(2)),
           low:Number(low.toFixed(2)),
           close:Number(close.toFixed(2)),
-          volume:80 + (i % 12) * 9,
+          volume,
         });
         last = close;
       }
@@ -116,13 +339,13 @@ fail extreme range       → clamp</pre>
         provider:synthetic ? "synthetic_demo_seed" : "example_broker:COMEX",
         quality_flags:synthetic ? ["demo_seed", "display_only"] : ["example_feed"],
         is_synthetic:synthetic,
-        bars:bars(120, {base:synthetic ? 3890 : 4100}),
+        bars:bars(120, {base:synthetic ? 3890 : 4100, seed:synthetic ? 7 : 42}),
       };
     }
 
     const syntheticFlags = ["demo_seed", "display_only"];
     const chart = new StandardKline.StandardKlineChart(document.getElementById("chart"), {
-      height:520,
+      height:560,
       showVolume:true,
       syntheticFlags,
     });
@@ -134,29 +357,35 @@ fail extreme range       → clamp</pre>
       const markerTime = StandardKline.nearestTime(adapted.candles, data.bars.at(-18).timestamp);
       chart.setAdaptedData(adapted, {
         priceLines:[
-          {price:last.close + 4, title:"resistance", color:"#7aa2ff", lineStyle:"dashed"},
-          {price:last.close - 5, title:"support", color:"#ff6b6b", lineStyle:"dashed"},
+          {price:last.close + 7.5, title:"resistance", color:"#7aa2ff", lineStyle:"dashed"},
+          {price:last.close - 8.5, title:"support", color:"#ff6b6b", lineStyle:"dashed"},
         ],
         markers:[
           {time:markerTime, position:"belowBar", color:"#d8aa3f", shape:"arrowUp", text:"entry"},
         ],
       });
-      updateMeta(kind);
+      updateBadges(kind);
       updateRange();
     }
 
-    function updateMeta(kind){
+    function updateBadges(kind){
       const meta = chart.current.meta;
-      document.getElementById("meta").textContent = `${kind} · ${meta.symbol} ${meta.timeframe} · ${meta.provider} · ${meta.bar_count} bars`;
+      const container = document.getElementById("statusBadges");
+      const modeLabel = kind === "synthetic" ? "SYNTHETIC" : "REAL";
+      container.innerHTML = `
+        <span class="badge live"><span class="pip"></span><b>${modeLabel}</b></span>
+        <span class="badge">${meta.symbol} · ${meta.timeframe}</span>
+        <span class="badge">${meta.provider}</span>
+        <span class="badge"><b>${meta.bar_count}</b>&nbsp;bars</span>
+      `;
     }
 
     function updateRange(){
       const range = chart.chart.timeScale().getVisibleLogicalRange();
-      document.getElementById("range").textContent = JSON.stringify({
-        from:Number(range.from.toFixed(2)),
-        to:Number(range.to.toFixed(2)),
-        width:Number((range.to - range.from).toFixed(2)),
-      }, null, 2);
+      if(!range) return;
+      document.getElementById("rangeFrom").textContent = range.from.toFixed(2);
+      document.getElementById("rangeTo").textContent = range.to.toFixed(2);
+      document.getElementById("rangeWidth").textContent = (range.to - range.from).toFixed(2) + " bars";
     }
 
     document.querySelector("[data-demo='real']").addEventListener("click", () => render("real"));
