@@ -6,6 +6,7 @@
 
 [![JavaScript](https://img.shields.io/badge/javascript-umd%20%2B%20commonjs-f7df1e.svg)](standard-kline.js)
 [![Lightweight Charts](https://img.shields.io/badge/lightweight--charts-%5E5.2.0-2962ff.svg)](https://github.com/tradingview/lightweight-charts)
+[![CI](https://github.com/zinan92/standard-kline/actions/workflows/ci.yml/badge.svg)](https://github.com/zinan92/standard-kline/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-node%20--test-2ea44f.svg)](standard-kline.test.js)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -25,6 +26,24 @@ fail extreme zoom/pan range    → clamp to data window + buffer
 ```
 
 `standard-kline` 是一个小型、无构建依赖的 K 线图包。它不关心你的数据来自 Tiger、Binance、券商 API、回测文件，还是未来别的数据源；只要输入能整理成统一 OHLCV bars，就能稳定渲染、缩放、平移、复位，并把真实数据和 synthetic/demo 数据明确区分开。
+
+## 示例输出
+
+真实浏览器 demo，包含 candlestick、volume、price lines、marker、toolbar zoom/pan/fit，以及 synthetic watermark。
+
+![standard-kline browser demo](docs/assets/standard-kline-demo.png)
+
+![standard-kline interaction demo](docs/assets/standard-kline-demo.gif)
+
+本地打开 demo：
+
+```bash
+npm install
+npx playwright install chromium
+npm run capture-demo
+```
+
+`npm run capture-demo` 会重新打开 [examples/browser-demo.html](examples/browser-demo.html)，生成 `docs/assets/standard-kline-demo.png` 和 `docs/assets/standard-kline-demo.gif`。
 
 ## 适用场景
 
@@ -54,8 +73,11 @@ fail extreme zoom/pan range    → clamp to data window + buffer
 ### Node / Bundler
 
 ```bash
+npm install github:zinan92/standard-kline
 npm install lightweight-charts
 ```
+
+这个仓库当前还没有发布到 npm。直接从 GitHub 安装私有仓库时，调用方需要有对应 GitHub 访问权限。
 
 ```js
 const {
@@ -95,6 +117,42 @@ const {
 ```
 
 每根 bar 只强制要求 `timestamp/open/high/low/close`。`timestamp` 支持 ISO UTC 字符串、epoch seconds、epoch milliseconds。坏行会被跳过，不会让整张图崩掉。
+
+## Adapter Examples
+
+`examples/adapters/` 里放了三个小 adapter。它们的目的不是把所有交易所字段都内置进包，而是演示如何把不同来源转成同一份 OHLCV payload，并保留市场语义。
+
+| Adapter | 输入 | 输出重点 |
+|---|---|---|
+| [generic-ohlcv.js](examples/adapters/generic-ohlcv.js) | 已经接近标准 OHLCV 的 rows | 补齐 schema/provider/timeframe，保留 `quality_flags` 数组 |
+| [binance-usdm.js](examples/adapters/binance-usdm.js) | Binance USD-M REST kline arrays | `provider: "binance_usdm"`，timestamp ms → ISO UTC |
+| [tiger-openapi-comex.js](examples/adapters/tiger-openapi-comex.js) | Tiger OpenAPI COMEX bar rows | `provider: "tiger_openapi:COMEX"`，不和 Binance 品种混成一个来源 |
+
+验证这些 examples：
+
+```bash
+node --test examples/adapters/adapter-examples.test.js
+```
+
+## 架构
+
+```text
+raw source rows
+      │
+      ▼
+source adapter examples
+      │  emits standard OHLCV payload
+      ▼
+adaptBarPayload()
+      │  candles + volumes + metadata + synthetic state
+      ▼
+StandardKlineChart
+      │
+      ├─ candlestick series
+      ├─ volume histogram
+      ├─ generic priceLines / markers
+      └─ zoom / pan / fit / watermark / resize
+```
 
 ## 基本用法
 
@@ -227,6 +285,32 @@ node --test standard-kline.test.js
 ```
 
 当前测试覆盖 adapter、timestamp conversion、synthetic detection、range clamp、nearest candle snapping。`StandardKlineChart` 需要真实 DOM 和 `lightweight-charts`，建议在接入应用里用 Playwright 做浏览器级验证。
+
+## For AI Agents
+
+```yaml
+name: standard-kline
+version: 0.1.0
+capability:
+  summary: Render provider-agnostic OHLCV payloads into a reusable candlestick chart.
+  in: standard OHLCV bars + provider/source metadata + generic overlays
+  out: candlestick chart + volume histogram + price lines + markers + synthetic watermark
+  fail:
+    - "missing LightweightCharts -> visible chart-library-missing overlay"
+    - "invalid OHLC rows -> drop bad rows"
+    - "empty payload -> visible no-kline-data overlay"
+    - "synthetic/demo data -> visible not-real-price watermark"
+  adapters:
+    - generic-ohlcv
+    - binance-usdm
+    - tiger-openapi-comex
+entrypoints:
+  browser: window.StandardKline
+  commonjs: require("standard-kline")
+tests:
+  unit: npm test
+  demo_capture: npm run capture-demo
+```
 
 ## 发布状态
 

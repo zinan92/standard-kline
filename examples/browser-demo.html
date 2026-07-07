@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>standard-kline browser demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="../standard-kline.js"></script>
+  <style>
+    :root{
+      --bg:#08090b;
+      --panel:#11151b;
+      --text:#e5e7eb;
+      --muted:#8b95a3;
+      --line:rgba(255,255,255,.12);
+      --gold:#d8aa3f;
+      --blue:#7aa2ff;
+      --red:#ff6b6b;
+      --green:#2dd4bf;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{min-height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr);gap:12px;padding:20px}
+    header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;border-bottom:1px solid var(--line);padding-bottom:14px}
+    h1{font-size:22px;line-height:1.1;margin:0 0 4px}
+    p{margin:0;color:var(--muted)}
+    .meta{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-align:right}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;min-height:0}
+    #chart{height:min(68vh,560px);min-height:420px;border:1px solid var(--line);background:rgba(255,255,255,.015)}
+    aside{border-left:1px solid var(--line);padding-left:16px;display:grid;gap:14px;align-content:start}
+    .block{display:grid;gap:8px}
+    .label{font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+    pre{margin:0;white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);padding:12px;overflow:auto;color:#cbd5e1}
+    button{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);color:var(--text);padding:7px 10px;cursor:pointer}
+    button:hover{border-color:rgba(216,170,63,.55);color:var(--gold)}
+    .buttons{display:flex;flex-wrap:wrap;gap:8px}
+    @media(max-width:900px){
+      main{padding:14px}
+      header{align-items:flex-start;flex-direction:column}
+      .meta{text-align:left}
+      .layout{grid-template-columns:1fr}
+      aside{border-left:0;border-top:1px solid var(--line);padding-left:0;padding-top:14px}
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>standard-kline</h1>
+        <p>Provider-agnostic OHLCV chart wrapper with synthetic watermark, overlays, zoom, pan, and fit.</p>
+      </div>
+      <div class="meta" id="meta">loading</div>
+    </header>
+    <section class="layout">
+      <div id="chart"></div>
+      <aside>
+        <div class="block">
+          <div class="label">Controls</div>
+          <div class="buttons">
+            <button type="button" data-demo="real">Real payload</button>
+            <button type="button" data-demo="synthetic">Synthetic payload</button>
+            <button type="button" data-demo="zoom">Zoom</button>
+            <button type="button" data-demo="pan">Pan</button>
+            <button type="button" data-demo="fit">Fit</button>
+          </div>
+        </div>
+        <div class="block">
+          <div class="label">Capability contract</div>
+          <pre>in  OHLCV bars + metadata + overlays
+out candles + volume + lines + markers
+
+fail synthetic/demo data → watermark
+fail extreme range       → clamp</pre>
+        </div>
+        <div class="block">
+          <div class="label">Current range</div>
+          <pre id="range">--</pre>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    function bars(count, options){
+      const start = Date.parse("2026-07-05T01:00:00Z") / 1000;
+      const out = [];
+      let last = options.base || 4100;
+      for(let i = 0; i < count; i += 1){
+        const drift = Math.sin(i / 7) * 7 + Math.cos(i / 13) * 4 + i * .18;
+        const close = Math.round((last + drift * .08) * 10) / 10;
+        const open = last;
+        const high = Math.max(open, close) + 2 + (i % 5) * .35;
+        const low = Math.min(open, close) - 2 - (i % 4) * .28;
+        out.push({
+          timestamp:start + i * 60,
+          open:Number(open.toFixed(2)),
+          high:Number(high.toFixed(2)),
+          low:Number(low.toFixed(2)),
+          close:Number(close.toFixed(2)),
+          volume:80 + (i % 12) * 9,
+        });
+        last = close;
+      }
+      return out;
+    }
+
+    function payload(kind){
+      const synthetic = kind === "synthetic";
+      return {
+        schema_version:"demo-ohlcv-v1",
+        status:synthetic ? "seeded" : "ready",
+        source_mode:synthetic ? "synthetic_demo" : "browser_demo",
+        symbol:synthetic ? "DEMO" : "MGCmain",
+        timeframe:"1m",
+        provider:synthetic ? "synthetic_demo_seed" : "example_broker:COMEX",
+        quality_flags:synthetic ? ["demo_seed", "display_only"] : ["example_feed"],
+        is_synthetic:synthetic,
+        bars:bars(120, {base:synthetic ? 3890 : 4100}),
+      };
+    }
+
+    const syntheticFlags = ["demo_seed", "display_only"];
+    const chart = new StandardKline.StandardKlineChart(document.getElementById("chart"), {
+      height:520,
+      showVolume:true,
+      syntheticFlags,
+    });
+
+    function render(kind){
+      const data = payload(kind);
+      const adapted = StandardKline.adaptBarPayload(data, {syntheticFlags});
+      const last = adapted.candles.at(-1);
+      const markerTime = StandardKline.nearestTime(adapted.candles, data.bars.at(-18).timestamp);
+      chart.setAdaptedData(adapted, {
+        priceLines:[
+          {price:last.close + 4, title:"resistance", color:"#7aa2ff", lineStyle:"dashed"},
+          {price:last.close - 5, title:"support", color:"#ff6b6b", lineStyle:"dashed"},
+        ],
+        markers:[
+          {time:markerTime, position:"belowBar", color:"#d8aa3f", shape:"arrowUp", text:"entry"},
+        ],
+      });
+      updateMeta(kind);
+      updateRange();
+    }
+
+    function updateMeta(kind){
+      const meta = chart.current.meta;
+      document.getElementById("meta").textContent = `${kind} · ${meta.symbol} ${meta.timeframe} · ${meta.provider} · ${meta.bar_count} bars`;
+    }
+
+    function updateRange(){
+      const range = chart.chart.timeScale().getVisibleLogicalRange();
+      document.getElementById("range").textContent = JSON.stringify({
+        from:Number(range.from.toFixed(2)),
+        to:Number(range.to.toFixed(2)),
+        width:Number((range.to - range.from).toFixed(2)),
+      }, null, 2);
+    }
+
+    document.querySelector("[data-demo='real']").addEventListener("click", () => render("real"));
+    document.querySelector("[data-demo='synthetic']").addEventListener("click", () => render("synthetic"));
+    document.querySelector("[data-demo='zoom']").addEventListener("click", () => { chart.zoom(.72); setTimeout(updateRange, 80); });
+    document.querySelector("[data-demo='pan']").addEventListener("click", () => { chart.pan(12); setTimeout(updateRange, 80); });
+    document.querySelector("[data-demo='fit']").addEventListener("click", () => { chart.fit(); setTimeout(updateRange, 80); });
+
+    render("real");
+  </script>
+</body>
+</html>

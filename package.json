@@ -5,11 +5,15 @@
   "main": "standard-kline.js",
   "files": [
     "standard-kline.js",
+    "examples",
+    "docs/assets",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test standard-kline.test.js"
+    "test": "node --test standard-kline.test.js examples/adapters/adapter-examples.test.js",
+    "capture-demo": "npx playwright test scripts/capture-demo.spec.js && python3 scripts/make-demo-gif.py"
   },
   "peerDependencies": {
     "lightweight-charts": "^5.2.0"
@@ -21,5 +25,8 @@
     "chart",
     "lightweight-charts"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
 }
