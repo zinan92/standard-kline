@@ -118,17 +118,13 @@ const {
 
 每根 bar 只强制要求 `timestamp/open/high/low/close`。`timestamp` 支持 ISO UTC 字符串、epoch seconds、epoch milliseconds。坏行会被跳过，不会让整张图崩掉。
 
-## Adapter Examples
+## Adapter Example
 
-`examples/adapters/` 里放了三个小 adapter。它们的目的不是把所有交易所字段都内置进包，而是演示如何把不同来源转成同一份 OHLCV payload，并保留市场语义。
+这个包**不内置任何具体数据源的 adapter**。把某个交易所/券商/服务的字段映射成本包的 OHLCV payload，是调用方（应用层）的事——一个通用图表库不应该认识 Binance、Tiger 或任何具体来源。本库只提供并文档化它自己的输入契约。
 
-| Adapter | 输入 | 输出重点 |
-|---|---|---|
-| [generic-ohlcv.js](examples/adapters/generic-ohlcv.js) | 已经接近标准 OHLCV 的 rows | 补齐 schema/provider/timeframe，保留 `quality_flags` 数组 |
-| [binance-usdm.js](examples/adapters/binance-usdm.js) | Binance USD-M REST kline arrays | `provider: "binance_usdm"`，timestamp ms → ISO UTC |
-| [tiger-openapi-comex.js](examples/adapters/tiger-openapi-comex.js) | Tiger OpenAPI COMEX bar rows | `provider: "tiger_openapi:COMEX"`，不和 Binance 品种混成一个来源 |
+[examples/adapters/generic-ohlcv.js](examples/adapters/generic-ohlcv.js) 是一个通用示例，演示如何把已经接近标准的 OHLCV rows 补齐成合法 payload：补上 `schema_version`/`provider`/`source_mode`/`timeframe`，保留每行的 `quality_flags`。你自己的数据源 adapter 照着输出同样的 payload 形状即可，代码住在你的应用里，不进这个包。
 
-验证这些 examples：
+验证这个示例：
 
 ```bash
 node --test examples/adapters/adapter-examples.test.js
@@ -140,7 +136,7 @@ node --test examples/adapters/adapter-examples.test.js
 raw source rows
       │
       ▼
-source adapter examples
+your adapter (lives in your app)
       │  emits standard OHLCV payload
       ▼
 adaptBarPayload()
@@ -300,10 +296,7 @@ capability:
     - "invalid OHLC rows -> drop bad rows"
     - "empty payload -> visible no-kline-data overlay"
     - "synthetic/demo data -> visible not-real-price watermark"
-  adapters:
-    - generic-ohlcv
-    - binance-usdm
-    - tiger-openapi-comex
+  adapters: "none built in — source→payload mapping lives in the consuming app; see examples/adapters/generic-ohlcv.js"
 entrypoints:
   browser: window.StandardKline
   commonjs: require("standard-kline")
