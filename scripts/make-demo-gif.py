@@ -21,12 +21,17 @@ def main():
     frames = load_frames()
     if not frames:
         raise SystemExit(f"no frames found in {FRAME_DIR}")
+    base_durations = [950, 850, 850, 850, 1200, 1200, 950]
+    durations = [
+        base_durations[index] if index < len(base_durations) else base_durations[-1]
+        for index in range(len(frames))
+    ]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     frames[0].save(
         OUT,
         save_all=True,
         append_images=frames[1:],
-        duration=[950, 850, 850, 1200, 950][: len(frames)],
+        duration=durations,
         loop=0,
         optimize=True,
     )

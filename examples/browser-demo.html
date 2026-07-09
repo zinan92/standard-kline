@@ -140,7 +140,7 @@
       grid-template-columns:minmax(0,1fr) 268px;
     }
     #chart{
-      height:560px;
+      height:620px;
       border-right:1px solid var(--line);
     }
     aside{
@@ -227,7 +227,7 @@
     footer a{color:var(--muted)}
     @media(max-width:920px){
       .layout{grid-template-columns:1fr}
-      #chart{border-right:0;border-bottom:1px solid var(--line);height:420px}
+      #chart{border-right:0;border-bottom:1px solid var(--line);height:480px}
       header{flex-direction:column;align-items:flex-start}
       .badges{align-items:flex-start}
       .badge-row{justify-content:flex-start}
@@ -245,7 +245,7 @@
         <div>
           <p class="eyebrow">candlestick renderer · zero build deps</p>
           <h1><em>standard</em>-kline</h1>
-          <p class="tagline">Any OHLCV source in, a trustworthy candlestick chart out — with synthetic-data watermarking and a zoom/pan/fit that can't get stuck.</p>
+          <p class="tagline">Any OHLCV source in, a trustworthy candlestick chart out — with presets, hollow-up candles, realtime bar updates, trust-policy blocking, indicators, and draggable price lines.</p>
         </div>
         <div class="badges">
           <div class="badge-row" id="statusBadges"></div>
@@ -261,10 +261,11 @@
             <p class="console-label">Console</p>
             <div class="keys">
               <button class="key" type="button" data-demo="real"><span class="f">F1</span> Real payload</button>
-              <button class="key" type="button" data-demo="synthetic"><span class="f">F2</span> Synthetic payload</button>
-              <button class="key" type="button" data-demo="zoom"><span class="f">F3</span> Zoom in</button>
-              <button class="key" type="button" data-demo="pan"><span class="f">F4</span> Pan right</button>
-              <button class="key" type="button" data-demo="fit"><span class="f">F5</span> Fit all</button>
+              <button class="key" type="button" data-demo="realtime"><span class="f">F2</span> Realtime tick</button>
+              <button class="key" type="button" data-demo="blocked"><span class="f">F3</span> Trust blocked</button>
+              <button class="key" type="button" data-demo="empty"><span class="f">F4</span> Empty issue</button>
+              <button class="key" type="button" data-demo="zoom"><span class="f">F5</span> Zoom in</button>
+              <button class="key" type="button" data-demo="fit"><span class="f">F6</span> Fit all</button>
             </div>
           </div>
           <div class="readout">
@@ -272,12 +273,16 @@
             <div class="readout-row"><span>from</span><b id="rangeFrom">--</b></div>
             <div class="readout-row"><span>to</span><b id="rangeTo">--</b></div>
             <div class="readout-row"><span>width</span><b id="rangeWidth">--</b></div>
+            <div class="readout-row"><span>last close</span><b id="lastClose">--</b></div>
+            <div class="readout-row"><span>drag line</span><b id="dragPrice">--</b></div>
+            <div class="readout-row"><span>trade action</span><b id="tradeAction">--</b></div>
+            <div class="readout-row"><span>R</span><b id="riskReward">--</b></div>
           </div>
           <div class="capability">
             <div><span class="in">in</span> &nbsp;OHLCV bars + provider metadata + overlays</div>
-            <div><span class="out">out</span> candles + volume + price lines + markers</div>
-            <div style="margin-top:8px"><span class="fail">fail</span> synthetic data &rarr; visible watermark</div>
-            <div><span class="fail">fail</span> extreme zoom/pan &rarr; clamped, never stuck</div>
+            <div><span class="out">out</span> preset + OHLC + R + EMA/MACD/RSI</div>
+            <div style="margin-top:8px"><span class="fail">fail</span> trust violation &rarr; blocking overlay</div>
+            <div><span class="fail">fail</span> access issue &rarr; explicit reason</div>
           </div>
         </aside>
       </div>
@@ -329,53 +334,142 @@
     }
 
     function payload(kind){
-      const synthetic = kind === "synthetic";
+      const blocked = kind === "blocked";
       return {
         schema_version:"demo-ohlcv-v1",
-        status:synthetic ? "seeded" : "ready",
-        source_mode:synthetic ? "synthetic_demo" : "browser_demo",
-        symbol:synthetic ? "DEMO" : "MGCmain",
+        status:blocked ? "blocked" : "ready",
+        source_mode:blocked ? "research_feed" : "exchange_realtime",
+        symbol:blocked ? "RESEARCH" : "MGCmain",
         timeframe:"1m",
-        provider:synthetic ? "synthetic_demo_seed" : "example_broker:COMEX",
-        quality_flags:synthetic ? ["demo_seed", "display_only"] : ["example_feed"],
-        is_synthetic:synthetic,
-        bars:bars(120, {base:synthetic ? 3890 : 4100, seed:synthetic ? 7 : 42}),
+        provider:blocked ? "public_research_feed" : "example_broker:COMEX",
+        quality_flags:blocked ? ["research_only", "not_execution_venue"] : ["execution_venue"],
+        is_synthetic:false,
+        served_from:blocked ? "cache" : "upstream",
+        fresh:!blocked,
+        age_seconds:blocked ? 5400 : 8,
+        max_age_seconds:90,
+        bars:bars(140, {base:blocked ? 3890 : 4100, seed:blocked ? 7 : 42}),
       };
     }
 
-    const syntheticFlags = ["demo_seed", "display_only"];
+    function emptyPayload(){
+      return {
+        schema_version:"demo-ohlcv-v1",
+        status:"error",
+        source_mode:"exchange_realtime",
+        symbol:"MGCmain",
+        timeframe:"1m",
+        provider:"example_broker:COMEX",
+        quality_flags:["execution_venue"],
+        is_synthetic:false,
+        served_from:"upstream",
+        fresh:true,
+        access_issues:["market data entitlement denied"],
+        reject_reason:"403 no candle access for requested symbol",
+        bars:[],
+      };
+    }
+
+    const trustPolicy = {
+      requireFresh:true,
+      allowSynthetic:false,
+      allowCache:false,
+      forbiddenQualityFlags:["research_only", "not_execution_venue"],
+      allowedSourceModes:["exchange_realtime"],
+    };
+    let currentPayload = null;
     const chart = new StandardKline.StandardKlineChart(document.getElementById("chart"), {
-      height:560,
-      showVolume:true,
-      syntheticFlags,
+      preset:"large",
+      candleDirection:"green-up-red-down",
+      showTradeControls:true,
+      trustPolicy,
+      indicators:{
+        ema:[
+          {period:10, color:"#7aa2ff"},
+          {period:20, color:"#f5b84b"},
+        ],
+        macd:true,
+        rsi:{period:14},
+      },
+      onPriceLineChange(change){
+        window.__lastPriceLineChange = change;
+        document.getElementById("dragPrice").textContent = change.price.toFixed(2);
+      },
+      onTradeAction(action){
+        window.__lastTradeAction = action;
+        document.getElementById("tradeAction").textContent = `${action.side} @ ${action.price?.toFixed?.(2) || "--"}`;
+      },
     });
+    window.demoChart = chart;
 
     function render(kind){
       const data = payload(kind);
-      const adapted = StandardKline.adaptBarPayload(data, {syntheticFlags});
+      currentPayload = data;
+      const adapted = StandardKline.adaptBarPayload(data, {trustPolicy});
       const last = adapted.candles.at(-1);
       const markerTime = StandardKline.nearestTime(adapted.candles, data.bars.at(-18).timestamp);
       chart.setAdaptedData(adapted, {
         priceLines:[
-          {price:last.close + 7.5, title:"resistance", color:"#7aa2ff", lineStyle:"dashed"},
-          {price:last.close - 8.5, title:"support", color:"#ff6b6b", lineStyle:"dashed"},
+          {id:"upper-alert", price:last.close + 7.5, title:"upper alert", color:"#7aa2ff", lineStyle:"dashed", draggable:true},
+          {id:"lower-reference", price:last.close - 8.5, title:"lower ref", color:"#ff6b6b", lineStyle:"dashed"},
         ],
+        riskReward:{
+          side:"long",
+          entry:last.close,
+          stop:last.close - 8.5,
+          target:last.close + 17,
+          amount:75000,
+          quantity:3,
+          widthBars:42,
+        },
         markers:[
-          {time:markerTime, position:"belowBar", color:"#d8aa3f", shape:"arrowUp", text:"entry"},
+          {time:markerTime, position:"belowBar", color:"#d8aa3f", shape:"arrowUp", text:"event"},
         ],
       });
       updateBadges(kind);
       updateRange();
+      updateLastClose();
+      updateRiskReward();
+    }
+
+    function renderEmpty(){
+      currentPayload = emptyPayload();
+      chart.setPayload(currentPayload, {priceLines:[], markers:[], fit:false});
+      updateBadges("empty");
+      updateRange();
+      updateLastClose();
+      updateRiskReward();
+    }
+
+    function realtimeUpdate(){
+      if(!currentPayload?.bars?.length) render("real");
+      const last = currentPayload.bars.at(-1);
+      window.__lastCloseBefore = Number(last.close);
+      const close = Number((last.close + 4.2).toFixed(2));
+      const next = {
+        ...last,
+        high:Number(Math.max(last.high, close + 1.1).toFixed(2)),
+        low:Number(Math.min(last.low, close - 1.1).toFixed(2)),
+        close,
+        volume:last.volume + 19,
+      };
+      currentPayload.bars[currentPayload.bars.length - 1] = next;
+      chart.updateBar(next);
+      window.__lastCloseAfter = chart.current.candles.at(-1).close;
+      updateBadges("real");
+      updateRange();
+      updateLastClose();
+      updateRiskReward();
     }
 
     function updateBadges(kind){
       const meta = chart.current.meta;
       const container = document.getElementById("statusBadges");
-      const modeLabel = kind === "synthetic" ? "SYNTHETIC" : "REAL";
+      const modeLabel = kind === "blocked" ? "BLOCKED" : (kind === "empty" ? "EMPTY" : "REALTIME");
       container.innerHTML = `
         <span class="badge live"><span class="pip"></span><b>${modeLabel}</b></span>
-        <span class="badge">${meta.symbol} · ${meta.timeframe}</span>
-        <span class="badge">${meta.provider}</span>
+        <span class="badge">${meta.symbol || "--"} · ${meta.timeframe || "--"}</span>
+        <span class="badge">${meta.provider || "--"}</span>
         <span class="badge"><b>${meta.bar_count}</b>&nbsp;bars</span>
       `;
     }
@@ -388,10 +482,21 @@
       document.getElementById("rangeWidth").textContent = (range.to - range.from).toFixed(2) + " bars";
     }
 
+    function updateLastClose(){
+      const close = chart.current.candles.at(-1)?.close;
+      document.getElementById("lastClose").textContent = close == null ? "--" : close.toFixed(2);
+    }
+
+    function updateRiskReward(){
+      const r = document.querySelector("[data-standard-kline-risk-reward]")?.dataset?.r;
+      document.getElementById("riskReward").textContent = r ? `${r}R` : "--";
+    }
+
     document.querySelector("[data-demo='real']").addEventListener("click", () => render("real"));
-    document.querySelector("[data-demo='synthetic']").addEventListener("click", () => render("synthetic"));
+    document.querySelector("[data-demo='realtime']").addEventListener("click", realtimeUpdate);
+    document.querySelector("[data-demo='blocked']").addEventListener("click", () => render("blocked"));
+    document.querySelector("[data-demo='empty']").addEventListener("click", renderEmpty);
     document.querySelector("[data-demo='zoom']").addEventListener("click", () => { chart.zoom(.72); setTimeout(updateRange, 80); });
-    document.querySelector("[data-demo='pan']").addEventListener("click", () => { chart.pan(12); setTimeout(updateRange, 80); });
     document.querySelector("[data-demo='fit']").addEventListener("click", () => { chart.fit(); setTimeout(updateRange, 80); });
 
     render("real");

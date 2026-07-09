@@ -2,6 +2,54 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const kline = require("./standard-kline.js");
 
+test("createStandardKlineOptions applies responsive defaults and hollow-up green-up theme", () => {
+  const options = kline.createStandardKlineOptions();
+  assert.equal(options.preset, "responsive");
+  assert.equal(options.showVolume, true);
+  assert.equal(options.showToolbar, true);
+  assert.equal(options.candleTheme.candleDirection, "green-up-red-down");
+  assert.equal(options.candleTheme.upColor, "transparent");
+  assert.equal(options.candleTheme.downColor.includes("255,107,107"), true);
+});
+
+test("createStandardKlineOptions supports red-up-green-down candle direction", () => {
+  const options = kline.createStandardKlineOptions({
+    preset: "small",
+    candleDirection: "red-up-green-down",
+  });
+  assert.equal(options.preset, "small");
+  assert.equal(options.compact, true);
+  assert.equal(options.candleTheme.upColor, "transparent");
+  assert.equal(options.candleTheme.borderUpColor, "#ef5f7c");
+  assert.equal(options.candleTheme.borderDownColor, "#23c19f");
+});
+
+test("defaultAgentDeploymentOptions is the no-question default chart contract", () => {
+  const options = kline.defaultAgentDeploymentOptions();
+  assert.equal(options.preset, "responsive");
+  assert.deepEqual(options.indicators, {});
+  assert.equal(options.candleTheme.hollowUp, true);
+  assert.equal(options.candleTheme.filledDown, true);
+});
+
+test("calculateRsiData returns bounded RSI points after the warmup period", () => {
+  const candles = Array.from({ length: 20 }, (_, index) => ({
+    time: index + 1,
+    close: index + 1,
+  }));
+  const rsi = kline.calculateRsiData(candles, 14);
+  assert.equal(rsi.length, 6);
+  assert.equal(rsi[0].time, 15);
+  assert.equal(rsi.at(-1).value, 100);
+});
+
+test("calculateRiskReward computes R without trade semantics", () => {
+  const rr = kline.calculateRiskReward({ side: "long", entry: 100, stop: 95, target: 115 });
+  assert.equal(rr.risk, 5);
+  assert.equal(rr.reward, 15);
+  assert.equal(rr.ratio, 3);
+});
+
 test("adaptBarPayload converts timestamps to epoch seconds and preserves provider metadata", () => {
   const payload = {
     schema_version: "ohlcv-v1",
@@ -35,6 +83,7 @@ test("adaptBarPayload drops rows missing required OHLC fields instead of throwin
   };
   const result = kline.adaptBarPayload(payload);
   assert.equal(result.candles.length, 1);
+  assert.equal(result.meta.rejected_rows, 2);
 });
 
 test("adaptBarPayload flags synthetic data via an explicit is_synthetic flag", () => {
@@ -43,6 +92,137 @@ test("adaptBarPayload flags synthetic data via an explicit is_synthetic flag", (
     bars: [{ timestamp: "2026-01-01T00:00:00Z", open: 1, high: 1, low: 1, close: 1 }],
   });
   assert.equal(result.meta.is_synthetic, true);
+});
+
+test("adaptDatafeedResponse maps CandleResponse candles and trust metadata", () => {
+  const result = kline.adaptDatafeedResponse({
+    schema_version: "kline-candles-v1",
+    ticker: "BTC",
+    asset_class: "crypto",
+    timeframe: "1m",
+    provider: "binance_spot",
+    source_mode: "binance_spot_public",
+    quality_flags: ["public_api", "research_only"],
+    is_synthetic: false,
+    served_from: "upstream",
+    fresh: true,
+    latest_timestamp: "2026-03-28T11:59:00Z",
+    age_seconds: 10,
+    max_age_seconds: 90,
+    candles: [
+      { timestamp: "2026-03-28T11:58:00Z", open: 10, high: 11, low: 9, close: 10.5, volume: 3, provider: "binance_spot", quality_flags: ["public_api"] },
+      { timestamp: "2026-03-28T11:59:00Z", open: 10.5, high: 12, low: 10, close: 11.5, volume: 4, provider: "binance_spot", quality_flags: ["public_api"] },
+    ],
+  });
+
+  assert.equal(result.candles.length, 2);
+  assert.equal(result.meta.symbol, "BTC");
+  assert.equal(result.meta.served_from, "upstream");
+  assert.equal(result.meta.fresh, true);
+  assert.equal(result.meta.age_seconds, 10);
+  assert.ok(result.meta.quality_flags.includes("research_only"));
+});
+
+test("evaluateTrustPolicy rejects stale, synthetic, cached, forbidden flags, and source-mode mismatch", () => {
+  const trust = kline.evaluateTrustPolicy({
+    source_mode: "research_feed",
+    served_from: "cache",
+    fresh: false,
+    is_synthetic: true,
+    quality_flags: ["research_only", "not_execution_venue"],
+  }, {
+    requireFresh: true,
+    allowSynthetic: false,
+    allowCache: false,
+    forbiddenQualityFlags: ["research_only", "not_execution_venue"],
+    allowedSourceModes: ["execution_feed"],
+  });
+
+  assert.equal(trust.trusted, false);
+  assert.deepEqual(trust.reasons.map(reason => reason.code), [
+    "fresh_required",
+    "synthetic_forbidden",
+    "cache_forbidden",
+    "quality_flag_forbidden",
+    "quality_flag_forbidden",
+    "source_mode_not_allowed",
+  ]);
+});
+
+test("adaptBarPayload links TrustPolicy to synthetic/cache blocking", () => {
+  const result = kline.adaptBarPayload({
+    source_mode: "rest_poll",
+    served_from: "cache",
+    fresh: true,
+    is_synthetic: true,
+    bars: [{ timestamp: "2026-01-01T00:00:00Z", open: 1, high: 2, low: 1, close: 2 }],
+  }, {
+    trustPolicy: { allowSynthetic: false, allowCache: false, allowedSourceModes: ["rest_poll"] },
+  });
+
+  assert.equal(result.trustState.blocked, true);
+  assert.deepEqual(result.trustState.reasons.map(reason => reason.code), ["synthetic_forbidden", "cache_forbidden"]);
+});
+
+test("mergeBarIntoAdaptedData replaces the last bar and appends new bars without rebuilding adapted data", () => {
+  const adapted = kline.adaptBarPayload({
+    source_mode: "upstream",
+    bars: [
+      { timestamp: 1000, open: 1, high: 2, low: 1, close: 1.5, volume: 5 },
+      { timestamp: 1060, open: 1.5, high: 2.5, low: 1.4, close: 2, volume: 6 },
+    ],
+  });
+
+  const replaced = kline.mergeBarIntoAdaptedData(adapted, { timestamp: 1060, open: 1.5, high: 3, low: 1.4, close: 2.8, volume: 9 });
+  assert.equal(replaced.action, "replace-last");
+  assert.equal(replaced.adapted.candles.at(-1).close, 2.8);
+  assert.equal(replaced.adapted.volumes.at(-1).value, 9);
+
+  const appended = kline.mergeBarIntoAdaptedData(replaced.adapted, { timestamp: 1120, open: 2.8, high: 3.1, low: 2.6, close: 3, volume: 11 });
+  assert.equal(appended.action, "append");
+  assert.equal(appended.adapted.candles.length, 3);
+  assert.equal(appended.adapted.meta.bar_count, 3);
+});
+
+test("StandardKlineChart.updateBar uses series.update for the latest bar", () => {
+  const calls = [];
+  const fake = {
+    current: kline.adaptBarPayload({
+      bars: [
+        { timestamp: 1000, open: 1, high: 2, low: 1, close: 1.5, volume: 5 },
+        { timestamp: 1060, open: 1.5, high: 2.5, low: 1.4, close: 2, volume: 6 },
+      ],
+    }),
+    options: {},
+    trustPolicy: null,
+    lastOverlays: {},
+    candleSeries: {
+      update(point){ calls.push(["candle.update", point]); },
+      setData(points){ calls.push(["candle.setData", points]); },
+    },
+    volumeSeries: {
+      update(point){ calls.push(["volume.update", point]); },
+      setData(points){ calls.push(["volume.setData", points]); },
+    },
+    _applyIndicators(){},
+    _setRiskReward(){},
+    _updateOhlcHeader(){},
+    _setSourceText(){},
+    _refreshOverlay(){},
+  };
+
+  const result = kline.StandardKlineChart.prototype.updateBar.call(fake, {
+    timestamp: 1060,
+    open: 1.5,
+    high: 3,
+    low: 1.4,
+    close: 2.8,
+    volume: 9,
+  });
+
+  assert.equal(result.candles.at(-1).close, 2.8);
+  assert.equal(calls[0][0], "candle.update");
+  assert.equal(calls[1][0], "volume.update");
 });
 
 test("adaptBarPayload flags synthetic data via a provider/source_mode substring match", () => {
