@@ -12,6 +12,8 @@
 
 </div>
 
+First flight: bot PR pipeline verified.
+
 ---
 
 ```text
