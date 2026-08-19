@@ -34,6 +34,7 @@
   };
   const DEFAULT_EMA_COLORS = ["#7aa2ff", "#f5b84b", "#c084fc", "#2dd4bf", "#ff6b6b"];
   const DEFAULT_RSI_COLOR = "#b7f566";
+  const LINE_SERIES_KINDS = new Set(["rate_level", "spread"]);
   const PRESET_CONFIGS = {
     large:{preset:"large", height:640, minHeight:520, compact:false, showToolbar:true, showOhlcHeader:true, showScaleControls:true, showVolume:true, barSpacing:8, rightOffset:10, minVisibleBars:12},
     medium:{preset:"medium", height:440, minHeight:340, compact:false, showToolbar:true, showOhlcHeader:true, showScaleControls:true, showVolume:true, barSpacing:7, rightOffset:8, minVisibleBars:8},
@@ -126,6 +127,11 @@
     if(Array.isArray(value)) return value.map(item => String(item || "").trim()).filter(Boolean);
     if(value == null || value === "") return [];
     return String(value).split(/[,\s|]+/).map(item => item.trim()).filter(Boolean);
+  }
+
+  function normalizeRenderMode(value){
+    const requested = String(value || "").trim().toLowerCase();
+    return requested === "line" || LINE_SERIES_KINDS.has(requested) ? "line" : "candles";
   }
 
   function toEpochSeconds(value){
@@ -252,6 +258,7 @@
     const trustState = evaluateTrustPolicy(meta, options?.trustPolicy);
     return {
       candles:sorted.map(item => item.candle),
+      line:payloadMeta.render_mode === "line" ? sorted.map(item => item.line).filter(Boolean) : [],
       volumes:sorted.map(item => item.volume),
       barMeta,
       meta,
@@ -269,6 +276,11 @@
       symbol:response?.symbol ?? response?.ticker ?? provenance.symbol ?? provenance.ticker ?? "",
       ticker:response?.ticker ?? provenance.ticker ?? response?.symbol ?? "",
       asset_class:response?.asset_class ?? provenance.asset_class ?? "",
+      series_kind:response?.series_kind ?? provenance.series_kind ?? "price",
+      unit:response?.unit ?? provenance.unit ?? "",
+      price_basis:response?.price_basis ?? provenance.price_basis ?? "",
+      semantic_role:response?.semantic_role ?? provenance.semantic_role ?? "",
+      render_mode:response?.render_mode ?? provenance.render_mode ?? response?.series_kind ?? provenance.series_kind ?? "candles",
       timeframe:response?.timeframe ?? provenance.timeframe ?? "",
       provider:response?.provider ?? provenance.provider ?? provenance.name ?? "",
       quality_flags:uniqueNormalized([...(normalizeQualityFlags(response?.quality_flags)), ...(normalizeQualityFlags(provenance.quality_flags))]),
@@ -288,6 +300,7 @@
         high:candle.high,
         low:candle.low,
         close:candle.close,
+        value:candle.value ?? candle.close,
         volume:candle.volume ?? 0,
         provider:candle.provider ?? response?.provider ?? provenance.provider ?? provenance.name ?? "",
         quality_flags:candle.quality_flags ?? candle.qualityFlags ?? [],
@@ -307,6 +320,7 @@
     const item = adaptOneBar(bar, meta, current.candles?.length || 0, options);
     if(!item) return {adapted:current, action:"invalid"};
     const candles = (current.candles || []).slice();
+    const line = (current.line || []).slice();
     const volumes = (current.volumes || []).slice();
     const barMeta = (current.barMeta || []).slice();
     const existingIndex = candles.findIndex(candle => Number(candle.time) === item.time);
@@ -326,6 +340,13 @@
       barMeta.splice(0, barMeta.length, ...zipped.map(row => row.meta));
       if(candles.at(-1)?.time !== item.time) action = "insert-historical";
     }
+    if(meta.render_mode === "line"){
+      const linePoint = item.line || {time:item.time, value:item.candle.close};
+      const lineIndex = line.findIndex(point => Number(point.time) === item.time);
+      if(lineIndex >= 0) line[lineIndex] = linePoint;
+      else line.push(linePoint);
+      line.sort((a, b) => Number(a.time) - Number(b.time));
+    }
     const nextMeta = {
       ...meta,
       bar_count:candles.length,
@@ -335,6 +356,7 @@
     nextMeta.is_synthetic = isSyntheticMeta(nextMeta, options?.syntheticFlags);
     const next = {
       candles,
+      line,
       volumes,
       barMeta,
       meta:nextMeta,
@@ -423,6 +445,11 @@
       symbol:payload?.symbol ?? payload?.ticker ?? provenance.symbol ?? provenance.ticker ?? "",
       ticker:payload?.ticker ?? provenance.ticker ?? payload?.symbol ?? "",
       asset_class:payload?.asset_class ?? provenance.asset_class ?? "",
+      series_kind:payload?.series_kind ?? provenance.series_kind ?? "price",
+      unit:payload?.unit ?? provenance.unit ?? "",
+      price_basis:payload?.price_basis ?? provenance.price_basis ?? "",
+      semantic_role:payload?.semantic_role ?? provenance.semantic_role ?? "",
+      render_mode:normalizeRenderMode(payload?.render_mode ?? provenance.render_mode ?? payload?.series_kind ?? provenance.series_kind),
       timeframe:payload?.timeframe ?? provenance.timeframe ?? "",
       provider:payload?.provider ?? provenance.provider ?? provenance.name ?? "",
       source_mode:payload?.source_mode ?? provenance.source_mode ?? "",
@@ -449,10 +476,12 @@
     if(time == null || open == null || high == null || low == null || close == null) return null;
     const normalized = {time, open, high, low, close, volume:Math.max(0, numberOrNull(row?.volume) ?? 0)};
     const qualityFlags = uniqueNormalized([...(normalizeQualityFlags(row?.quality_flags)), ...(normalizeQualityFlags(row?.qualityFlags))]);
+    const lineValue = numberOrNull(row?.value ?? close);
     return {
       time,
       sourceIndex:index,
       candle:{time, open, high, low, close},
+      line:lineValue == null ? null : {time, value:lineValue},
       volume:makeVolumePoint(normalized, options),
       meta:{
         symbol:row?.symbol ?? payloadMeta.symbol ?? "",
@@ -647,6 +676,18 @@
 .standard-kline-message span{color:#ffb3b3}
 .standard-kline-empty .standard-kline-message b{color:${COLORS.amber}}
 .standard-kline-blocked .standard-kline-message{border-color:rgba(255,107,107,.44);background:rgba(34,8,10,.92)}
+.standard-kline-root.light{background:#fffefa;color:#17201b}
+.standard-kline-root.light .standard-kline-toolbar{border-color:#dedfd8;color:#68736b;background:#f7f9f5}
+.standard-kline-root.light .standard-kline-toolbar button,.standard-kline-root.light .standard-kline-actionbar button,.standard-kline-root.light .standard-kline-scale-controls button{border-color:#cfd7d0;background:#fff;color:#526779}
+.standard-kline-root.light .standard-kline-toolbar button:hover,.standard-kline-root.light .standard-kline-actionbar button:hover,.standard-kline-root.light .standard-kline-scale-controls button:hover,.standard-kline-root.light .standard-kline-scale-controls button.is-active{border-color:#187b51;color:#187b51}
+.standard-kline-root.light .standard-kline-source{color:#87918b}
+.standard-kline-root.light .standard-kline-ohlc{border-color:#dedfd8;background:rgba(255,255,255,.92);color:#526779}
+.standard-kline-root.light .standard-kline-ohlc .is-up{color:#187b51}
+.standard-kline-root.light .standard-kline-ohlc .is-down{color:#c94640}
+.standard-kline-root.light .standard-kline-message{border-color:#dedfd8;background:#fff;color:#526779;box-shadow:0 16px 48px rgba(23,32,27,.12)}
+.standard-kline-root.light .standard-kline-message span{color:#8a4b47}
+.standard-kline-root.light .standard-kline-empty .standard-kline-message b{color:#a36c14}
+.standard-kline-root.light .standard-kline-blocked .standard-kline-message{border-color:#e6b5b1;background:#fff5f3}
 `;
     root.document.head.appendChild(style);
   }
@@ -658,8 +699,10 @@
       if(!this.container) throw new Error("StandardKlineChart container not found");
       this.options = createStandardKlineOptions(options);
       this.candleTheme = this.options.candleTheme;
+      this.renderMode = normalizeRenderMode(this.options.renderMode || this.options.series_kind || this.options.seriesKind);
       this.chart = null;
       this.candleSeries = null;
+      this.lineSeries = null;
       this.volumeSeries = null;
       this.markerApi = null;
       this.priceLines = [];
@@ -693,7 +736,8 @@
     _buildDom(){
       this.container.innerHTML = "";
       this.rootEl = root.document.createElement("div");
-      this.rootEl.className = `standard-kline-root${this.options.compact ? " compact" : ""}`;
+      const appearance = String(this.options.appearance || this.options.surface || "dark").toLowerCase();
+      this.rootEl.className = `standard-kline-root${this.options.compact ? " compact" : ""}${appearance === "light" ? " light" : ""}`;
       this.rootEl.dataset.standardKline = "true";
       this.rootEl.dataset.preset = this.options.preset || "responsive";
       if(this.options.minHeight) this.rootEl.style.minHeight = `${this.options.minHeight}px`;
@@ -765,19 +809,45 @@
         return;
       }
       const size = this._size();
+      const light = String(this.options.appearance || this.options.surface || "dark").toLowerCase() === "light";
       this.chart = lwc.createChart(this.chartEl, {
         width:size.width,
         height:size.height,
-        layout:{background:{type:"solid", color:"transparent"}, textColor:this.options.textColor || COLORS.text, fontSize:11, attributionLogo:false},
-        grid:{vertLines:{color:this.options.gridColor || "rgba(255,255,255,.045)"}, horzLines:{color:this.options.gridColor || COLORS.grid}},
+        layout:{background:{type:"solid", color:"transparent"}, textColor:this.options.textColor || (light ? "#68736b" : COLORS.text), fontSize:11, attributionLogo:false},
+        grid:{vertLines:{color:this.options.gridColor || (light ? "rgba(23,32,27,.08)" : "rgba(255,255,255,.045)")}, horzLines:{color:this.options.gridColor || (light ? "rgba(23,32,27,.10)" : COLORS.grid)}},
         crosshair:{mode:lwc.CrosshairMode?.Normal ?? 1},
-        rightPriceScale:{borderVisible:true, borderColor:"rgba(255,255,255,.18)", minimumWidth:46, mode:this._priceScaleMode(), scaleMargins:{top:.08,bottom:this.options.showVolume === false ? .10 : .28}},
-        timeScale:{visible:true, borderVisible:true, borderColor:"rgba(255,255,255,.20)", timeVisible:true, secondsVisible:false, rightOffset:this.options.rightOffset ?? 8, barSpacing:this.options.barSpacing || (this.options.compact ? 5 : 7), minBarSpacing:.5, rightBarStaysOnScroll:true, ticksVisible:true},
+        rightPriceScale:{borderVisible:true, borderColor:light ? "rgba(23,32,27,.18)" : "rgba(255,255,255,.18)", minimumWidth:46, mode:this._priceScaleMode(), scaleMargins:{top:.08,bottom:this.options.showVolume === false ? .10 : .28}},
+        timeScale:{visible:true, borderVisible:true, borderColor:light ? "rgba(23,32,27,.20)" : "rgba(255,255,255,.20)", timeVisible:true, secondsVisible:false, rightOffset:this.options.rightOffset ?? 8, barSpacing:this.options.barSpacing || (this.options.compact ? 5 : 7), minBarSpacing:.5, rightBarStaysOnScroll:true, ticksVisible:true},
         handleScroll:{mouseWheel:true, pressedMouseMove:true, horzTouchDrag:true, vertTouchDrag:true},
         handleScale:{axisPressedMouseMove:true, mouseWheel:true, pinch:true},
         localization:{priceFormatter:price => formatPrice(price,2)},
       });
       this._patchTimeScale();
+      this._createPrimarySeries();
+      this.chart.subscribeCrosshairMove?.(this._boundCrosshairMove);
+      this._timeScale?.subscribeVisibleLogicalRangeChange?.(this._boundVisibleRangeChange);
+      this._refreshScaleControlState();
+      this.resizeObserver = new ResizeObserver(() => this.resize());
+      this.resizeObserver.observe(this.container);
+      this.resize();
+    }
+
+    _createPrimarySeries(){
+      const lwc = root.LightweightCharts || {};
+      if(this.renderMode === "line"){
+        this.lineSeries = this.chart.addSeries(lwc.LineSeries, {
+          color:this.options.lineColor || "#526779",
+          lineWidth:Math.max(1, numberOrNull(this.options.lineWidth) ?? 2),
+          priceLineVisible:false,
+          lastValueVisible:true,
+          title:this.options.lineTitle || "",
+          priceFormat:{type:"price", precision:2, minMove:.01},
+        });
+        this.lineSeries.priceScale().applyOptions({scaleMargins:{top:.08,bottom:.10}});
+        this.volumeSeries = null;
+        this.markerApi = lwc.createSeriesMarkers ? lwc.createSeriesMarkers(this.lineSeries, []) : null;
+        return;
+      }
       this.candleSeries = this.chart.addSeries(lwc.CandlestickSeries, {
         upColor:this.candleTheme.upColor,
         downColor:this.candleTheme.downColor,
@@ -800,12 +870,20 @@
         this.volumeSeries.priceScale().applyOptions({scaleMargins:{top:.78,bottom:.02}});
       }
       if(lwc.createSeriesMarkers) this.markerApi = lwc.createSeriesMarkers(this.candleSeries, []);
-      this.chart.subscribeCrosshairMove?.(this._boundCrosshairMove);
-      this._timeScale?.subscribeVisibleLogicalRangeChange?.(this._boundVisibleRangeChange);
-      this._refreshScaleControlState();
-      this.resizeObserver = new ResizeObserver(() => this.resize());
-      this.resizeObserver.observe(this.container);
-      this.resize();
+    }
+
+    _ensureRenderMode(mode){
+      const nextMode = normalizeRenderMode(mode);
+      if(nextMode === this.renderMode || !this.chart) return;
+      if(this.candleSeries) this.chart.removeSeries?.(this.candleSeries);
+      if(this.lineSeries) this.chart.removeSeries?.(this.lineSeries);
+      if(this.volumeSeries) this.chart.removeSeries?.(this.volumeSeries);
+      this.candleSeries = null;
+      this.lineSeries = null;
+      this.volumeSeries = null;
+      this.markerApi = null;
+      this.renderMode = nextMode;
+      this._createPrimarySeries();
     }
 
     _patchTimeScale(){
@@ -864,22 +942,34 @@
       return this.setAdaptedData(adapted, overlays);
     }
 
+    /** Load a normalized datafeed CandleResponse through the canonical adapter. */
+    setDatafeedResponse(response, overlays){
+      const adapted = adaptDatafeedResponse(response, {syntheticFlags:this.options.syntheticFlags, trustPolicy:this.trustPolicy, candleTheme:this.candleTheme, volumeColors:this.candleTheme});
+      return this.setAdaptedData(adapted, overlays);
+    }
+
     setAdaptedData(adapted, overlays){
       this.lastOverlays = overlays || {};
       this.current = adapted || adaptBarPayload(null, {syntheticFlags:this.options.syntheticFlags, trustPolicy:this.trustPolicy});
       if(!this.current.trustState) this.current.trustState = evaluateTrustPolicy(this.current.meta, this.trustPolicy);
       this.trustState = this.current.trustState;
+      this._ensureRenderMode(this.current.meta?.render_mode);
       const candles = this.current.candles || [];
-      if(this.candleSeries) this.candleSeries.setData(candles);
-      if(this.volumeSeries) this.volumeSeries.setData(recolorVolumes(candles, this.current.volumes || [], this.candleTheme));
+      if(this.renderMode === "line"){
+        const line = this.current.line?.length ? this.current.line : candles.map(item => ({time:item.time, value:item.close}));
+        this.lineSeries?.setData(line);
+      }else{
+        if(this.candleSeries) this.candleSeries.setData(candles);
+        if(this.volumeSeries) this.volumeSeries.setData(recolorVolumes(candles, this.current.volumes || [], this.candleTheme));
+      }
       this._setPriceLines(this.lastOverlays?.priceLines || []);
       this._setMarkers(this.lastOverlays?.markers || []);
       this._setRiskReward(this.lastOverlays?.riskReward || this.lastOverlays?.risk_reward || null);
       this._applyIndicators(this.lastOverlays?.indicators);
-      this._updateOhlcHeader(candles.at(-1));
+      this._updateOhlcHeader(this.renderMode === "line" ? this.current.line?.at(-1) : candles.at(-1));
       this._setSourceText(this.current.meta);
       this._refreshOverlay();
-      if(candles.length && this.lastOverlays?.fit !== false) this.fit();
+      if(this._barCount() && this.lastOverlays?.fit !== false) this.fit();
       return this.current;
     }
 
@@ -897,7 +987,14 @@
       if(merged.action === "invalid") return null;
       this.current = merged.adapted;
       this.trustState = this.current.trustState;
-      if(this.candleSeries){
+      if(this.renderMode === "line" && this.lineSeries){
+        const linePoint = merged.item.line || {time:merged.item.time, value:merged.item.candle?.close};
+        if(merged.action === "append" || merged.action === "replace-last"){
+          this.lineSeries.update(linePoint);
+        }else{
+          this.lineSeries.setData(this.current.line || []);
+        }
+      }else if(this.candleSeries){
         if(merged.action === "append" || merged.action === "replace-last"){
           this.candleSeries.update(merged.item.candle);
         }else{
@@ -913,7 +1010,7 @@
       }
       this._applyIndicators(this.lastOverlays?.indicators);
       this._setRiskReward(this.lastOverlays?.riskReward || this.lastOverlays?.risk_reward || null);
-      this._updateOhlcHeader(this.current.candles.at(-1));
+      this._updateOhlcHeader(this.renderMode === "line" ? this.current.line?.at(-1) : this.current.candles.at(-1));
       this._setSourceText(this.current.meta);
       this._refreshOverlay();
       if(this.autoFit) this.fit();
@@ -945,7 +1042,7 @@
     setAutoFit(enabled){
       this.autoFit = Boolean(enabled);
       if(this.autoFit) this.fit();
-      this.candleSeries?.priceScale?.()?.applyOptions?.({autoScale:true});
+      (this.candleSeries || this.lineSeries)?.priceScale?.()?.applyOptions?.({autoScale:true});
       this._refreshScaleControlState();
       this._updateRiskRewardOverlay();
       return this.autoFit;
@@ -953,7 +1050,7 @@
 
     setLogScale(enabled){
       this.logScale = Boolean(enabled);
-      this.candleSeries?.priceScale?.()?.applyOptions?.({mode:this._priceScaleMode()});
+      (this.candleSeries || this.lineSeries)?.priceScale?.()?.applyOptions?.({mode:this._priceScaleMode()});
       this.chart?.applyOptions?.({rightPriceScale:{mode:this._priceScaleMode()}});
       this._refreshScaleControlState();
       this._updateRiskRewardOverlay();
@@ -964,19 +1061,21 @@
       const sorted = (markers || []).slice().sort((a,b) => Number(a.time) - Number(b.time));
       if(this.markerApi?.setMarkers) this.markerApi.setMarkers(sorted);
       else if(this.candleSeries?.setMarkers) this.candleSeries.setMarkers(sorted);
+      else if(this.lineSeries?.setMarkers) this.lineSeries.setMarkers(sorted);
     }
 
     _setPriceLines(lines){
-      if(this.candleSeries?.removePriceLine){
-        this.priceLineItems.forEach(line => this.candleSeries.removePriceLine(line.api));
+      const primarySeries = this.candleSeries || this.lineSeries;
+      if(primarySeries?.removePriceLine){
+        this.priceLineItems.forEach(line => primarySeries.removePriceLine(line.api));
       }
       this.priceLines = [];
       this.priceLineItems = [];
       (lines || []).forEach(line => {
         const price = numberOrNull(line.price);
-        if(price == null || !this.candleSeries?.createPriceLine) return;
+        if(price == null || !primarySeries?.createPriceLine) return;
         const id = String(line.id || line.title || `price-line-${this.priceLineItems.length + 1}`);
-        const api = this.candleSeries.createPriceLine({
+        const api = primarySeries.createPriceLine({
           price,
           color:line.color || COLORS.gold,
           lineWidth:line.lineWidth || 1,
@@ -1030,11 +1129,17 @@
       return {ema, macd, rsi};
     }
 
+    _indicatorCandles(){
+      const candles = this.current?.candles || [];
+      if(candles.length) return candles;
+      return (this.current?.line || []).map(point => ({time:point.time, close:point.value}));
+    }
+
     _applyIndicators(indicators){
-      if(!this.chart || !this.candleSeries) return;
+      if(!this.chart || (!this.candleSeries && !this.lineSeries)) return;
       const lwc = root.LightweightCharts || {};
       const options = this._normalizeIndicatorOptions(indicators);
-      const candles = this.current?.candles || [];
+      const candles = this._indicatorCandles();
       const wantedEmaKeys = new Set(options.ema.map(item => String(item.period)));
 
       this.indicatorSeries.ema.forEach((entry, key) => {
@@ -1155,14 +1260,15 @@
     }
 
     _hitTestPriceLine(clientY){
-      if(!this.candleSeries?.priceToCoordinate) return null;
+      const primarySeries = this.candleSeries || this.lineSeries;
+      if(!primarySeries?.priceToCoordinate) return null;
       const rect = this.chartEl.getBoundingClientRect();
       const y = clientY - rect.top;
       let best = null;
       let bestDistance = Infinity;
       this.priceLineItems.forEach(item => {
         if(!item.draggable) return;
-        const coordinate = this.candleSeries.priceToCoordinate(item.price);
+        const coordinate = primarySeries.priceToCoordinate(item.price);
         if(coordinate == null) return;
         const distance = Math.abs(Number(coordinate) - y);
         if(distance <= 10 && distance < bestDistance){
@@ -1183,10 +1289,11 @@
     }
 
     _onMouseMove(event){
-      if(!this.dragState || !this.candleSeries?.coordinateToPrice) return;
+      const primarySeries = this.candleSeries || this.lineSeries;
+      if(!this.dragState || !primarySeries?.coordinateToPrice) return;
       const rect = this.chartEl.getBoundingClientRect();
       const y = clampNumber(event.clientY - rect.top, 0, rect.height);
-      const price = numberOrNull(this.candleSeries.coordinateToPrice(y));
+      const price = numberOrNull(primarySeries.coordinateToPrice(y));
       if(price == null) return;
       const item = this.priceLineItems.find(line => line.id === this.dragState.id);
       if(!item) return;
@@ -1243,16 +1350,17 @@
     }
 
     _updateRiskRewardOverlay(){
-      if(!this.riskRewardEl || !this.candleSeries) return;
+      const primarySeries = this.candleSeries || this.lineSeries;
+      if(!this.riskRewardEl || !primarySeries) return;
       const rr = calculateRiskReward(this.currentRiskReward);
       if(!rr){
         this.riskRewardEl.classList.remove("is-visible");
         this.riskRewardEl.dataset.r = "";
         return;
       }
-      const yEntry = this.candleSeries.priceToCoordinate?.(rr.entry);
-      const yStop = this.candleSeries.priceToCoordinate?.(rr.stop);
-      const yTarget = this.candleSeries.priceToCoordinate?.(rr.target);
+      const yEntry = primarySeries.priceToCoordinate?.(rr.entry);
+      const yStop = primarySeries.priceToCoordinate?.(rr.stop);
+      const yTarget = primarySeries.priceToCoordinate?.(rr.target);
       if(yEntry == null || yStop == null || yTarget == null){
         this.riskRewardEl.classList.remove("is-visible");
         return;
@@ -1286,6 +1394,21 @@
 
     _updateOhlcHeader(bar){
       if(!this.ohlcEl || this.options.showOhlcHeader === false) return;
+      if(this.renderMode === "line"){
+        const point = bar || this.current?.line?.at(-1);
+        if(!point){
+          this.ohlcEl.textContent = "值 --";
+          return;
+        }
+        const points = this.current?.line || [];
+        const index = points.findIndex(item => Number(item.time) === Number(point.time));
+        const previous = index > 0 ? points[index - 1]?.value : point.value;
+        const change = numberOrNull(point.value) != null && numberOrNull(previous) != null ? Number(point.value) - Number(previous) : 0;
+        const pct = previous ? change / Number(previous) * 100 : 0;
+        const cls = change >= 0 ? "is-up" : "is-down";
+        this.ohlcEl.innerHTML = `<span>值 ${formatPrice(point.value, 3)}</span><span class="${cls}">${formatSigned(change, 3)} (${formatSigned(pct, 2)}%)</span>`;
+        return;
+      }
       if(!bar){
         this.ohlcEl.textContent = "O -- H -- L -- C --";
         return;
@@ -1303,19 +1426,24 @@
 
     _onCrosshairMove(param){
       if(!param?.time){
-        this._updateOhlcHeader(this.current?.candles?.at(-1));
+        this._updateOhlcHeader(this.renderMode === "line" ? this.current?.line?.at(-1) : this.current?.candles?.at(-1));
         return;
       }
       const time = toEpochSeconds(param.time);
+      if(this.renderMode === "line"){
+        const point = (this.current?.line || []).find(item => Number(item.time) === Number(time));
+        this._updateOhlcHeader(point || this.current?.line?.at(-1));
+        return;
+      }
       const bar = (this.current?.candles || []).find(item => Number(item.time) === Number(time));
       this._updateOhlcHeader(bar || this.current?.candles?.at(-1));
     }
 
     _emitTradeAction(side){
-      const bar = this.current?.candles?.at(-1) || null;
+      const bar = this.renderMode === "line" ? this.current?.line?.at(-1) : this.current?.candles?.at(-1) || null;
       const payload = {
         side,
-        price:bar?.close ?? null,
+        price:this.renderMode === "line" ? (bar?.value ?? null) : (bar?.close ?? null),
         bar,
         meta:this.current?.meta || {},
         trustState:this.getTrustState(),
@@ -1333,15 +1461,15 @@
       if(!source) return;
       const mode = meta?.source_mode || "unknown";
       const provider = meta?.provider || "unknown";
-      const count = meta?.bar_count || this.current.candles.length || 0;
+      const count = meta?.bar_count || this._barCount() || 0;
       const flags = normalizeQualityFlags(meta?.quality_flags);
       source.textContent = `${meta?.symbol || "--"} ${meta?.timeframe || ""} · ${mode} · ${provider} · ${count} bars${flags.length ? " · " + flags.join(",") : ""}`;
     }
 
     _refreshOverlay(){
       if(this.loading) return;
-      const candles = this.current.candles || [];
-      if(!candles.length){
+      const points = this.renderMode === "line" ? (this.current.line || []) : (this.current.candles || []);
+      if(!points.length){
         this._setOverlay("empty", "NO KLINE DATA", describeEmptyMeta(this.current.meta));
         return;
       }
@@ -1371,7 +1499,7 @@
     }
 
     _barCount(){
-      return this.current?.candles?.length || 0;
+      return this.renderMode === "line" ? (this.current?.line?.length || 0) : (this.current?.candles?.length || 0);
     }
 
     _rightOffset(){
@@ -1465,6 +1593,7 @@
     isSyntheticMeta,
     mergeBarIntoAdaptedData,
     normalizeCandleTheme,
+    normalizeRenderMode,
     nearestTime,
     normalizeQualityFlags,
     toEpochSeconds,

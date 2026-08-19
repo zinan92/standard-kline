@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>standard-kline · price and rate semantics</title>
+  <script src="../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="../standard-kline.js"></script>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#17201b;background:#f1efe9}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px;background:#f1efe9}
+    main{max-width:980px;margin:0 auto;background:#fffefa;border:1px solid #dedfd8}
+    header{padding:22px 26px;border-bottom:1px solid #dedfd8}
+    h1{margin:0 0 6px;font-size:26px;font-weight:650}
+    p{margin:0;color:#68736b;font-size:13px;line-height:1.55}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+    section{min-width:0;padding:18px;border-right:1px solid #dedfd8}
+    section:last-child{border-right:0}
+    h2{font-size:15px;margin:0 0 10px;color:#187b51}
+    .chart{height:390px;border:1px solid #eceee8;background:#fffefa}
+    @media(max-width:760px){body{padding:0}.grid{grid-template-columns:1fr}section{border-right:0;border-bottom:1px solid #dedfd8}.chart{height:360px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1>标准 K 线语义测试</h1><p>价格资产使用蜡烛图；收益率与利差使用折线图，不把收益率伪装成债券价格。</p></header>
+    <div class="grid">
+      <section><h2>黄金 · 价格 K 线</h2><div id="price-chart" class="chart"></div></section>
+      <section><h2>美国 2 年期收益率 · 折线</h2><div id="rate-chart" class="chart"></div></section>
+    </div>
+  </main>
+  <script>
+    const start = Date.parse("2026-01-02T00:00:00Z") / 1000;
+    const priceCandles = Array.from({length:72}, (_, index) => {
+      const close = 2500 + index * 2 + Math.sin(index / 4) * 18;
+      const open = close - (index % 3 === 0 ? 7 : -5);
+      return {timestamp:start + index * 86400, open, high:Math.max(open, close) + 12, low:Math.min(open, close) - 11, close, volume:100 + index};
+    });
+    const rateCandles = Array.from({length:72}, (_, index) => {
+      const value = 4.2 + Math.sin(index / 8) * .22 - index * .001;
+      return {timestamp:start + index * 86400, open:value, high:value, low:value, close:value, value};
+    });
+    window.priceChart = new StandardKline.StandardKlineChart(document.querySelector("#price-chart"), {
+      preset:"responsive", appearance:"light", candleDirection:"green-up-red-down", hollowUp:true, filledDown:true,
+      indicators:{ema:[50], macd:{fastPeriod:12, slowPeriod:26, signalPeriod:9}},
+    });
+    window.rateChart = new StandardKline.StandardKlineChart(document.querySelector("#rate-chart"), {
+      preset:"responsive", appearance:"light", renderMode:"line", lineColor:"#526779", lineWidth:2,
+      indicators:{ema:[50], macd:{fastPeriod:12, slowPeriod:26, signalPeriod:9}},
+    });
+    window.priceChart.setDatafeedResponse({schema_version:"kline-candles-v1", status:"ready", symbol:"GOLD", ticker:"GOLD", series_kind:"price", render_mode:"candles", timeframe:"1d", provider:"test", source_mode:"test", fresh:true, candles:priceCandles});
+    window.rateChart.setDatafeedResponse({schema_version:"kline-candles-v1", status:"ready", symbol:"DGS2", ticker:"DGS2", series_kind:"rate_level", render_mode:"line", unit:"percent", price_basis:"yield_level", semantic_role:"treasury_yield_not_bond_price", timeframe:"1d", provider:"test", source_mode:"test", fresh:true, candles:rateCandles});
+  </script>
+</body>
+</html>
