@@ -82,3 +82,15 @@ test("price candles and rate lines render at desktop and mobile without overflow
   }
   expect(errors).toEqual([]);
 });
+
+test("missing lightweight-charts peer remains visibly blocked after data load", async ({page}) => {
+  const {server, baseUrl} = await startServer();
+  try{
+    await page.goto(`${baseUrl}/examples/missing-peer-demo.html`, {waitUntil:"networkidle"});
+    await expect(page.locator("[data-standard-kline-overlay]")).toHaveAttribute("data-state", "empty");
+    await expect(page.locator("[data-standard-kline-overlay]")).toContainText("CHART LIBRARY MISSING");
+    expect(await page.evaluate(() => ({chart:Boolean(window.demoChart.chart), libraryAvailable:window.demoChart.libraryAvailable}))).toEqual({chart:false, libraryAvailable:false});
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
