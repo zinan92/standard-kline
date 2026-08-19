@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>standard-kline missing peer</title><script src="../standard-kline.js"></script><style>body{margin:0;padding:20px;background:#fff}#chart{height:360px;border:1px solid #ddd}</style></head>
+<body><div id="chart"></div><script>
+window.demoChart=new StandardKline.StandardKlineChart(document.querySelector("#chart"),{appearance:"light"});
+window.demoChart.setDatafeedResponse({ticker:"GOLD",series_kind:"price",timeframe:"1d",provider:"test",source_mode:"test",bars:[{timestamp:"2026-03-27T00:00:00Z",open:1,high:2,low:1,close:1.5}]});
+</script></body></html>
