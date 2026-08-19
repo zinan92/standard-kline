@@ -163,6 +163,20 @@ test("spread payloads also select line mode and keep basis-point values", () => 
   assert.deepEqual(result.line, [{time: Math.floor(Date.parse("2026-03-27T00:00:00Z") / 1000), value: 35}]);
 });
 
+test("adaptDatafeedResponse accepts the Weekly CandleResponse bars field", () => {
+  const result = kline.adaptDatafeedResponse({
+    ticker: "GOLD",
+    asset_class: "commodity",
+    series_kind: "price",
+    timeframe: "weekly",
+    provider: "weekly_datafeed",
+    source_mode: "datafeed:yahoo_finance_futures",
+    bars: [{timestamp: "2026-03-27T00:00:00Z", open: 3100, high: 3120, low: 3080, close: 3110}],
+  });
+  assert.equal(result.candles.length, 1);
+  assert.equal(result.candles[0].close, 3110);
+});
+
 test("evaluateTrustPolicy rejects stale, synthetic, cached, forbidden flags, and source-mode mismatch", () => {
   const trust = kline.evaluateTrustPolicy({
     source_mode: "research_feed",

@@ -268,7 +268,9 @@
 
   function adaptDatafeedResponse(response, options){
     const provenance = response?.provenance || {};
-    const candles = Array.isArray(response?.candles) ? response.candles : [];
+    const candles = Array.isArray(response?.candles)
+      ? response.candles
+      : (Array.isArray(response?.bars) ? response.bars : []);
     const payload = {
       schema_version:response?.schema_version || provenance.schema_version || "kline-candles-v1",
       status:response?.status || "ready",
