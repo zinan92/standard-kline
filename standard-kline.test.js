@@ -123,6 +123,60 @@ test("adaptDatafeedResponse maps CandleResponse candles and trust metadata", () 
   assert.ok(result.meta.quality_flags.includes("research_only"));
 });
 
+test("adaptDatafeedResponse preserves rate semantics and exposes line mode without relabeling values as candles", () => {
+  const result = kline.adaptDatafeedResponse({
+    schema_version: "kline-candles-v1",
+    ticker: "DGS2",
+    asset_class: "macro",
+    series_kind: "rate_level",
+    unit: "percent",
+    price_basis: "yield_level",
+    semantic_role: "treasury_yield_not_bond_price",
+    timeframe: "1w",
+    provider: "fred_public_csv_macro",
+    source_mode: "fred_public_csv_macro",
+    fresh: true,
+    candles: [
+      {timestamp: "2026-03-20T00:00:00Z", open: 4.1, high: 4.1, low: 4.1, close: 4.1, value: 4.1},
+      {timestamp: "2026-03-27T00:00:00Z", open: 4.2, high: 4.2, low: 4.2, close: 4.2, value: 4.2},
+    ],
+  });
+
+  assert.equal(result.meta.series_kind, "rate_level");
+  assert.equal(result.meta.render_mode, "line");
+  assert.equal(result.meta.semantic_role, "treasury_yield_not_bond_price");
+  assert.deepEqual(result.line.map(point => point.value), [4.1, 4.2]);
+  assert.equal(result.candles[0].close, 4.1);
+});
+
+test("spread payloads also select line mode and keep basis-point values", () => {
+  const result = kline.adaptDatafeedResponse({
+    ticker: "T10Y2Y",
+    asset_class: "macro",
+    series_kind: "spread",
+    unit: "basis points",
+    timeframe: "1w",
+    candles: [{timestamp: "2026-03-27T00:00:00Z", open: 35, high: 35, low: 35, close: 35, value: 35}],
+  });
+  assert.equal(result.meta.render_mode, "line");
+  assert.equal(result.meta.unit, "basis points");
+  assert.deepEqual(result.line, [{time: Math.floor(Date.parse("2026-03-27T00:00:00Z") / 1000), value: 35}]);
+});
+
+test("adaptDatafeedResponse accepts the Weekly CandleResponse bars field", () => {
+  const result = kline.adaptDatafeedResponse({
+    ticker: "GOLD",
+    asset_class: "commodity",
+    series_kind: "price",
+    timeframe: "weekly",
+    provider: "weekly_datafeed",
+    source_mode: "datafeed:yahoo_finance_futures",
+    bars: [{timestamp: "2026-03-27T00:00:00Z", open: 3100, high: 3120, low: 3080, close: 3110}],
+  });
+  assert.equal(result.candles.length, 1);
+  assert.equal(result.candles[0].close, 3110);
+});
+
 test("evaluateTrustPolicy rejects stale, synthetic, cached, forbidden flags, and source-mode mismatch", () => {
   const trust = kline.evaluateTrustPolicy({
     source_mode: "research_feed",

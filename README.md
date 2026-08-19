@@ -30,6 +30,13 @@ fail extreme zoom/pan range    → clamp to data window + buffer
 
 `standard-kline` 是一个小型、无构建依赖的 K 线图包。它不关心你的数据来自哪个交易所、券商 API、回测文件，还是未来别的数据源；只要输入能整理成统一 OHLCV bars，就能稳定渲染、缩放、平移、复位、增量更新，并把真实数据和 synthetic/cache/research-only 等不可信状态明确拦出来。
 
+Rate-level and spread payloads are supported as semantic line charts. Set
+`series_kind` to `rate_level` or `spread` (or `render_mode: "line"`) on the
+payload/CandleResponse; the adapter preserves `unit`, `price_basis` and
+`semantic_role`, and the renderer creates a `LineSeries` instead of a
+candlestick or volume histogram. It never fabricates equal-value OHLC candles
+for a yield or spread.
+
 ## 示例输出
 
 真实浏览器 demo，包含 preset、hollow-up candlestick、OHLC header、time axis、volume、EMA/MACD/RSI、左上角 Long/Short action buttons、risk/reward R overlay、draggable price line、marker、toolbar zoom/pan/fit、A/L scale controls、realtime last-bar update，以及 trust-policy blocking overlay。
@@ -102,6 +109,8 @@ const {
   symbol: "BTCUSD",
   timeframe: "1m",
   provider: "example_exchange",
+  series_kind: "price",
+  render_mode: "candles",
   quality_flags: [],
   is_synthetic: false,
   served_from: "upstream",
@@ -201,6 +210,17 @@ const options = StandardKline.createStandardKlineOptions({
 
 ```js
 const options = StandardKline.defaultAgentDeploymentOptions();
+```
+
+Reader-facing pages can opt into the approved white surface while retaining the
+same trust and candle rules:
+
+```js
+const options = StandardKline.createStandardKlineOptions({
+  appearance: "light",
+  renderMode: "candles", // "line" for rate_level/spread
+  indicators: {ema: [50], macd: {fastPeriod: 12, slowPeriod: 26, signalPeriod: 9}},
+});
 ```
 
 这个默认配置等价于：`preset:"responsive"`、绿涨红跌、涨空心、跌实心、不开默认指标。
